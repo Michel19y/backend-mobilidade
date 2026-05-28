@@ -4,6 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 
+const adminRouter = require('./routes/admin');
+console.log('👉 CONTEÚDO DO ADMIN ROUTER:', adminRouter.stack ? "Rotas carregadas!" : adminRouter);
 const ridesRouter = require('./routes/rides');
 const mapsRouter = require('./routes/maps');
 const authRouter = require('./routes/auth'); // 👈 1. IMPORTAÇÃO ADICIONADA AQUI!
@@ -55,7 +57,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRouter);   // 👈 2. REGISTRO DA ROTA ADICIONADO AQUI!
 app.use('/api/rides', ridesRouter);
 app.use('/api/maps', mapsRouter);
-
+app.use('/api', adminRouter); 
 // ============================================================
 // Handler de rotas não encontradas
 // ============================================================

@@ -131,4 +131,137 @@ router.post('/login-motorista', async (req, res) => {
   }
 });
 
+
+// ============================================================
+// 🌟 NOVAS ROTAS: AUTENTICAÇÃO DO PASSAGEIRO
+// ============================================================
+
+// 1. Cadastro de Passageiro Isolado no Backend
+// 1. Cadastro de Passageiro Isolado no Backend (COM LOGS DE DEBUG)
+router.post('/register-passageiro', async (req, res) => {
+  try {
+    // 🔍 LOG 1: Mostra exatamente o que o app enviou para o servidor
+    console.log('\n==================================================');
+    console.log('[DEBUG] Dados recebidos no req.body:', req.body);
+    console.log('==================================================\n');
+
+    const { email, password, nome, cpfLimpo, celular } = req.body;
+
+    // Validação básica de entrada
+    if (!email || !password || !nome || !cpfLimpo) {
+      console.log('⚠️ [DEBUG] Falha na validação inicial. Campos presentes:', { 
+        temEmail: !!email, 
+        temPassword: !!password, 
+        temNome: !!nome, 
+        temCpfLimpo: !!cpfLimpo 
+      });
+      return res.status(400).json({ error: 'Preencha todos os dados obrigatórios.' });
+    }
+
+    // REGRA DE NEGÓCIO: Evita duplicidade de CPF na tabela de passageiros
+    const { data: existente, error: checkError } = await supabase
+      .from('passageiros')
+      .select('cpf')
+      .eq('cpf', cpfLimpo)
+      .maybeSingle();
+
+    if (checkError) {
+      console.error('🚨 [DEBUG] Erro ao consultar a tabela passageiros:', checkError);
+      throw checkError;
+    }
+
+    if (existente) {
+      console.log(`⚠️ [DEBUG] Cadastro barrado: CPF ${cpfLimpo} já existe na tabela passageiros.`);
+      return res.status(400).json({ error: 'Este CPF já está cadastrado como passageiro.' });
+    }
+
+    console.log('🚀 [DEBUG] Tentando criar usuário no Supabase Auth Admin...');
+    
+    // Cria o usuário na Auth do Supabase com a role travada como 'passageiro'
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: nome, type: 'passageiro', role: 'passageiro' }
+    });
+
+    if (authError) {
+      console.error('🚨 [DEBUG] O Supabase Auth recusou a criação do usuário:', authError.message);
+      return res.status(400).json({ error: authError.message });
+    }
+
+    console.log(`✅ [DEBUG] Usuário criado no Auth com sucesso! ID: ${authData.user?.id}`);
+    console.log('🔄 [DEBUG] Inserindo dados complementares na tabela de passageiros...');
+
+    // Insere os dados complementares na tabela de 'passageiros'
+    const { error: dbError } = await supabase
+      .from('passageiros')
+     .insert([{ 
+  id: authData.user?.id, // ✨ CORRIGIDO! Agora bate com a coluna 'id' do seu banco
+  nome, 
+  email, 
+  cpf: cpfLimpo, 
+  celular
+}]);
+
+    if (dbError) {
+      console.error('🚨 [DEBUG] Erro fatal ao tentar dar o .insert no banco:', dbError);
+      throw dbError;
+    }
+
+    console.log('🎉 [DEBUG] Tudo deu certo! Passageiro cadastrado.');
+    return res.status(201).json({ message: 'Passageiro cadastrado com sucesso!' });
+
+  } catch (err) {
+    console.error('\n💥 [DEBUG ERROR CRÍTICO NO CATCH]:', err);
+    return res.status(500).json({ error: 'Erro interno ao processar o cadastro do passageiro.' });
+  }
+});
+
+// 2. Login de Passageiro Isolado no Backend
+router.post('/login-passageiro', async (req, res) => {
+  try {
+    const email = req.body.email?.toLowerCase().trim();
+    const { password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Preencha todos os campos para entrar.' });
+    }
+
+    // Autentica o usuário no Supabase
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (authError) {
+      return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
+    }
+
+    // Valida se o ID autenticado realmente pertence à tabela de passageiros
+    const { data: passageiro, error: dbError } = await supabase
+      .from('passageiros')
+      .select('id')
+      .eq('id', authData.user.id)
+      .maybeSingle();
+
+    if (dbError || !passageiro) {
+      // Se tentar logar no app de passageiro usando uma conta de motorista, barra aqui!
+      await supabase.auth.signOut();
+      return res.status(403).json({ error: 'Esta conta não está registrada como passageiro.' });
+    }
+
+    // Retorna a sessão para o app salvar no AsyncStorage
+    return res.status(200).json({
+      message: 'Login efetuado com sucesso!',
+      session: authData.session,
+      user: authData.user
+    });
+
+  } catch (err) {
+    console.error('[Erro Login Passageiro]', err);
+    return res.status(500).json({ error: 'Erro interno ao processar o login do passageiro.' });
+  }
+});
+
 module.exports = router;
