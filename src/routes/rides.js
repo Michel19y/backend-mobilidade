@@ -69,6 +69,7 @@ router.post('/solicitar', authMiddleware, async (req, res) => {
 });
 
 // 2. Listar Corridas Disponíveis (O que o Motorista busca no radar)
+// Troque a rota /disponiveis por:
 router.get('/disponiveis', authMiddleware, async (req, res) => {
     try {
         const { data, error } = await supabaseAdmin
@@ -77,13 +78,14 @@ router.get('/disponiveis', authMiddleware, async (req, res) => {
             .eq('status', 'aguardando')
             .is('driver_id', null);
 
-        // --- ADICIONE ISTO ---
-        console.log('🔍 [DEBUG BACKEND] Corridas encontradas no Supabase:', data ? data.length : 'Erro/Vazio');
-        console.log('🔍 [DEBUG BACKEND] Erro do banco:', error);
-        // ---------------------
-
         if (error) throw error;
-        return res.json(data || []);
+
+        const corridas = (data || []).map(ride => ({
+            ...ride,
+            ganho_motorista: parseFloat((ride.valor * (1 - COMISSAO_PLATAFORMA)).toFixed(2)),
+        }));
+
+        return res.json(corridas);
     } catch (err) {
         return res.status(500).json({ error: 'Erro ao buscar chamadas.' });
     }
@@ -94,9 +96,20 @@ router.get('/disponiveis', authMiddleware, async (req, res) => {
 router.post('/aceitar', authMiddleware, async (req, res) => {
     const { ride_id } = req.body;
     try {
+        // Busca o ID correto na tabela motoristas pelo email do auth
+        const { data: motorista, error: errMotorista } = await supabaseAdmin
+            .from('motoristas')
+            .select('id')
+            .eq('email', req.user.email)
+            .single();
+
+        if (errMotorista || !motorista) {
+            return res.status(403).json({ error: 'Motorista não encontrado.' });
+        }
+
         const { data, error } = await supabaseAdmin
             .from('rides')
-            .update({ driver_id: req.user.id, status: 'aceita' })
+            .update({ driver_id: motorista.id, status: 'aceita' })
             .eq('id', ride_id)
             .eq('status', 'aguardando')
             .is('driver_id', null)
@@ -108,7 +121,6 @@ router.post('/aceitar', authMiddleware, async (req, res) => {
         return res.status(500).json({ error: 'Erro ao aceitar.' });
     }
 });
-
 // 4. Cancelar Corrida (Passageiro)
 router.post('/cancelar', authMiddleware, async (req, res) => {
     const { ride_id } = req.body;
